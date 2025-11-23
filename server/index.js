@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const mongoose = require("mongoose");
+const Snippet = require("./models/Snippet"); // Import the new Model
 
 dotenv.config();
 
@@ -18,9 +19,33 @@ mongoose
   .then(() => console.log("✅ MongoDB Connected Successfully"))
   .catch((err) => console.error("❌ MongoDB Connection Error:", err));
 
-// Routes
+// --- ROUTES ---
+
+// 1. Test Route
 app.get("/", (req, res) => {
-  res.send("Runbox API is running successfully!");
+  res.send("Runbox API is running!");
+});
+
+// 2. SAVE Code Route (The New Feature)
+app.post("/api/save", async (req, res) => {
+  try {
+    const { userId, code, language } = req.body;
+
+    // Create a new snippet in the database
+    const newSnippet = new Snippet({
+      userId,
+      code,
+      language,
+      title: "Interview Practice"
+    });
+
+    await newSnippet.save();
+    res.status(201).json({ message: "Code saved successfully!", snippet: newSnippet });
+    
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to save code" });
+  }
 });
 
 // Start Server

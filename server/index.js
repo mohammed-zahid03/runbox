@@ -48,6 +48,40 @@ app.post("/api/save", async (req, res) => {
   }
 });
 
+// 3. GET All Snippets for a User
+app.get("/api/snippets/:userId", async (req, res) => {
+  try {
+    const { userId } = req.params;
+    // Find snippets for this user & sort by newest first (-1)
+    const snippets = await Snippet.find({ userId }).sort({ createdAt: -1 });
+    res.json(snippets);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: "Failed to fetch snippets" });
+  }
+});
+
+// 4. GET Single Snippet by ID
+app.get("/api/snippet/:id", async (req, res) => {
+  try {
+    const snippet = await Snippet.findById(req.params.id);
+    if (!snippet) return res.status(404).json({ error: "Snippet not found" });
+    res.json(snippet);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch snippet" });
+  }
+});
+
+// 5. DELETE Snippet
+app.delete("/api/snippets/:id", async (req, res) => {
+  try {
+    await Snippet.findByIdAndDelete(req.params.id);
+    res.json({ message: "Snippet deleted successfully" });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to delete snippet" });
+  }
+});
+
 // Start Server
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

@@ -1,17 +1,41 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useParams } from "react-router-dom"; // To read the URL ID
 import CodeEditor from "../components/CodeEditor";
-import { ArrowLeft, Loader2, Play, Save } from "lucide-react"; 
+import { ArrowLeft, Loader2, Play, Save } from "lucide-react";
 import { Link } from "react-router-dom";
-import { executeCode, saveCode } from "../api/code"; // Importing from new file
-import { useUser } from "@clerk/clerk-react"; 
-import toast, { Toaster } from "react-hot-toast"; // Notification tool
+import { executeCode, saveCode, getSnippetById } from "../api/code";
+import { useUser } from "@clerk/clerk-react";
+import toast, { Toaster } from "react-hot-toast";
 
 export default function InterviewRoom() {
   const { user } = useUser();
-  const [code, setCode] = useState("// Write your solution here\nconsole.log('Hello from Runbox!');");
+  const { id } = useParams(); // Get ID from URL (e.g., /room/123)
+  
+  const [code, setCode] = useState("// Loading...");
   const [output, setOutput] = useState<string[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+
+  // LOAD SAVED CODE (The Fix)
+  useEffect(() => {
+    const loadSnippet = async () => {
+      if (id && id !== "new") {
+        try {
+          const data = await getSnippetById(id);
+          if (data.code) {
+             setCode(data.code); // Update the editor with saved code
+             
+          }
+        } catch (error) {
+          toast.error("Could not load code");
+        }
+      } else {
+        // Default starter code for new files
+        setCode("// Write your solution here\nconsole.log('Hello from Runbox!');");
+      }
+    };
+    loadSnippet();
+  }, [id]);
 
   // Run Code Logic
   const runCode = async () => {
@@ -40,7 +64,6 @@ export default function InterviewRoom() {
       await saveCode(user.id, code);
       toast.success("Code saved to Cloud!");
     } catch (error) {
-      console.error(error);
       toast.error("Failed to save.");
     } finally {
       setIsSaving(false);
@@ -49,14 +72,14 @@ export default function InterviewRoom() {
 
   return (
     <div className="min-h-screen bg-gray-950 text-white flex flex-col">
-      <Toaster position="top-center" /> {/* This is the popup container */}
+      <Toaster position="top-center" />
       
       {/* Header */}
       <header className="h-16 border-b border-gray-800 flex items-center px-6 bg-gray-900">
         <Link to="/dashboard" className="text-gray-400 hover:text-white transition-colors mr-4">
           <ArrowLeft size={20} />
         </Link>
-        <h1 className="font-bold text-lg">Interview Room: <span className="text-blue-400">Two Sum</span></h1>
+        <h1 className="font-bold text-lg">Interview Room</h1>
         
         {/* Buttons */}
         <div className="ml-auto flex gap-3">

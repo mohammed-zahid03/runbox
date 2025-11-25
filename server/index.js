@@ -2,7 +2,8 @@ const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const mongoose = require("mongoose");
-const Snippet = require("./models/Snippet"); // Import the new Model
+const Snippet = require("./models/Snippet");
+const { GoogleGenerativeAI } = require("@google/generative-ai"); // 1. Import AI
 
 dotenv.config();
 
@@ -19,49 +20,40 @@ mongoose
   .then(() => console.log("✅ MongoDB Connected Successfully"))
   .catch((err) => console.error("❌ MongoDB Connection Error:", err));
 
+// 2. AI Configuration
+const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+
 // --- ROUTES ---
 
-// 1. Test Route
+// Test Route
 app.get("/", (req, res) => {
   res.send("Runbox API is running!");
 });
 
-// 2. SAVE Code Route (The New Feature)
+// SAVE Code Route
 app.post("/api/save", async (req, res) => {
   try {
     const { userId, code, language } = req.body;
-
-    // Create a new snippet in the database
-    const newSnippet = new Snippet({
-      userId,
-      code,
-      language,
-      title: "Interview Practice"
-    });
-
+    const newSnippet = new Snippet({ userId, code, language, title: "Interview Practice" });
     await newSnippet.save();
-    res.status(201).json({ message: "Code saved successfully!", snippet: newSnippet });
-    
+    res.status(201).json({ message: "Code saved!", snippet: newSnippet });
   } catch (error) {
-    console.error(error);
     res.status(500).json({ error: "Failed to save code" });
   }
 });
 
-// 3. GET All Snippets for a User
+// GET All Snippets
 app.get("/api/snippets/:userId", async (req, res) => {
   try {
     const { userId } = req.params;
-    // Find snippets for this user & sort by newest first (-1)
     const snippets = await Snippet.find({ userId }).sort({ createdAt: -1 });
     res.json(snippets);
   } catch (error) {
-    console.error(error);
     res.status(500).json({ error: "Failed to fetch snippets" });
   }
 });
 
-// 4. GET Single Snippet by ID
+// GET Single Snippet
 app.get("/api/snippet/:id", async (req, res) => {
   try {
     const snippet = await Snippet.findById(req.params.id);
@@ -72,13 +64,45 @@ app.get("/api/snippet/:id", async (req, res) => {
   }
 });
 
-// 5. DELETE Snippet
+// DELETE Snippet
 app.delete("/api/snippets/:id", async (req, res) => {
   try {
     await Snippet.findByIdAndDelete(req.params.id);
-    res.json({ message: "Snippet deleted successfully" });
+    res.json({ message: "Snippet deleted" });
   } catch (error) {
-    res.status(500).json({ error: "Failed to delete snippet" });
+    res.status(500).json({ error: "Failed to delete" });
+  }
+});
+
+// 6. AI HINT Route
+app.post("/api/ai/hint", async (req, res) => {
+  console.log("🤖 AI Hint Request Received!");
+  
+  try {
+    const { code } = req.body;
+    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+    const prompt = `
+      You are an expert coding interviewer. 
+      Here is the user's code:
+      "${code}"
+
+      Please provide a helpful, concise hint to help them improve or fix their code. 
+      DO NOT write the full solution code. Just give a conceptual hint or point out a logic error.
+      Keep it under 3 sentences.
+    `;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const hint = response.text();
+    
+    // --- THE SPY ---
+    console.log("🧠 GEMINI SAYS:", hint); 
+    // ----------------
+
+    res.json({ hint });
+  } catch (error) {
+    console.error("AI Error:", error);
+    res.status(500).json({ error: "Failed to generate hint" });
   }
 });
 

@@ -49,3 +49,13 @@ export const deleteSnippet = async (id: string) => {
     console.error("Error deleting snippet:", error);
   }
 };
+
+// AI Hint
+export const getAIHint = async (code: string) => {
+  const response = await fetch("http://localhost:5000/api/ai/hint", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+  return await response.json();
+};

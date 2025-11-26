@@ -32,24 +32,34 @@ mongoose
   .catch((err) => console.error("❌ MongoDB Connection Error:", err));
 
 // AI Configuration
+// PASTE YOUR KEY DIRECTLY HERE (Inside quotes)
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 // --- SOCKET.IO REAL-TIME LOGIC ---
 io.on("connection", (socket) => {
   console.log("🔌 User Connected:", socket.id);
 
-  // User Joins a Room (e.g., room "123")
+  
+
+
+  // 1. User Joins Room
   socket.on("join-room", (roomId) => {
     socket.join(roomId);
     console.log(`User ${socket.id} joined room: ${roomId}`);
   });
 
-  // User Types Code -> Send it to others in the room
+  // 2. Code Change
   socket.on("code-change", ({ roomId, code }) => {
     socket.to(roomId).emit("code-update", code);
   });
 
-  // User Disconnects
+  // 3. Warning Signal (Anti-Cheat)
+  socket.on("signal-warning", (roomId) => {
+    console.log("⚠️ WARNING RECEIVED for Room:", roomId); // <--- ADD THIS
+    socket.to(roomId).emit("receive-warning", "⚠️ Candidate switched tabs!");
+  });
+
+  // 4. Disconnect
   socket.on("disconnect", () => {
     console.log("User Disconnected:", socket.id);
   });
@@ -98,15 +108,34 @@ app.delete("/api/snippets/:id", async (req, res) => {
   }
 });
 
+// 6. AI HINT Route (Debug Version)
 app.post("/api/ai/hint", async (req, res) => {
+  console.log("🤖 AI Hint Request Received!"); 
+
   try {
     const { code } = req.body;
+    
+    // TRY THIS MODEL NAME (It is the most standard one)
+    // Use the name exactly as it appeared in your successful test list
     const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
-    const prompt = `You are a coding interviewer. Hint for: "${code}". Short, no solution.`;
+
+    const prompt = `Hint for this code (no solution): "${code}"`;
+
     const result = await model.generateContent(prompt);
-    res.json({ hint: result.response.text() });
+    const response = await result.response;
+    const hint = response.text();
+    
+    console.log("✅ Hint generated:", hint);
+    res.json({ hint });
+    
   } catch (error) {
-    res.status(500).json({ error: "Failed to generate hint" });
+    console.error("❌ AI Error:", error);
+    
+    // SEND THE REAL ERROR TO THE BROWSER
+    res.status(500).json({ 
+        error: "AI Failed", 
+        details: error.message || error.toString() 
+    });
   }
 });
 

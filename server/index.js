@@ -59,6 +59,25 @@ io.on("connection", (socket) => {
     socket.to(roomId).emit("receive-warning", "⚠️ Candidate switched tabs!");
   });
 
+  // ... inside io.on ...
+
+// 4. Chat Message
+  // Update to accept 'id'
+  socket.on("send-message", ({ roomId, message, sender, id }) => {
+    // Broadcast to everyone ELSE
+    socket.to(roomId).emit("receive-message", { message, sender, id });
+  });
+
+ // ... inside io.on ...
+
+ // 4. Chat Message
+  socket.on("send-message", ({ roomId, message, sender }) => {
+    // CHANGE THIS: Use 'io.to' to send to EVERYONE (including sender)
+    io.to(roomId).emit("receive-message", { message, sender });
+  });
+
+  // ... (disconnect logic)
+
   // 4. Disconnect
   socket.on("disconnect", () => {
     console.log("User Disconnected:", socket.id);

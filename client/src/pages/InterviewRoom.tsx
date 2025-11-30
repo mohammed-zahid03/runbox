@@ -1,3 +1,4 @@
+import VideoCall from "../components/VideoCall";
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "react-router-dom";
 import CodeEditor from "../components/CodeEditor";
@@ -9,6 +10,7 @@ import toast, { Toaster } from "react-hot-toast";
 import { socket } from "../socket";
 import jsPDF from "jspdf";
 import { LANGUAGE_VERSIONS, CODE_SNIPPETS } from "../constants";
+
 
 interface Message {
   sender: string;
@@ -258,6 +260,7 @@ export default function InterviewRoom() {
           <CodeEditor code={code} onChange={handleCodeChange} />
         </div>
       </div>
+      <VideoCall />
     </div>
   );
 }

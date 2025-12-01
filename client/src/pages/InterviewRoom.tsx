@@ -53,10 +53,10 @@ export default function InterviewRoom() {
             }
         } 
         else if (location.state?.role) {
-            const { role, topic, experience } = location.state;
+            const { role, topic, experience, description } = location.state;
             try {
                 setQuestion("Generating your unique interview question...");
-                const data = await generateQuestion(role, topic, experience);
+                const data = await generateQuestion(role, topic, experience, description);
                 if (data.question) setQuestion(data.question);
             } catch (err) {
                 setQuestion("Failed to generate question. Using default.");

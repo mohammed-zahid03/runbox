@@ -14,6 +14,7 @@ import { Loader2, Plus } from "lucide-react";
 import toast from "react-hot-toast";
 
 export default function InterviewModal() {
+  const [description, setDescription] = useState("");
   const [open, setOpen] = useState(false);
   const [role, setRole] = useState("");
   const [topic, setTopic] = useState("");
@@ -43,6 +44,7 @@ export default function InterviewModal() {
                 role, 
                 topic, 
                 experience,
+                description,
                 mode: "technical" // Default mode for now
             } 
         });
@@ -82,6 +84,16 @@ export default function InterviewModal() {
                 value={topic} 
                 onChange={(e) => setTopic(e.target.value)} 
                 className="bg-black/50 border-zinc-700 focus:border-blue-500 text-white" 
+            />
+          </div>
+
+          <div className="grid gap-2">
+            <Label className="text-zinc-400">Job Description (Paste from LinkedIn)</Label>
+          <textarea 
+            placeholder="Paste the full job description here..."
+            value={description} 
+            onChange={(e) => setDescription(e.target.value)} 
+            className="bg-black/50 border-zinc-700 focus:border-blue-500 text-white min-h-[100px] p-2 rounded-md text-sm" 
             />
           </div>
 

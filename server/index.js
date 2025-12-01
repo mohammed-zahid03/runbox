@@ -168,34 +168,35 @@ app.post("/api/ai/hint", async (req, res) => {
 // 7. GENERATE INTERVIEW QUESTION (Upgraded)
 app.post("/api/ai/generate", async (req, res) => {
   try {
-    const { role, topic, experience } = req.body;
+    const { role, topic, experience, description } = req.body;
     
     // Using the same model that worked for hints
     const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
 
     // Smarter Prompt for Interview Questions
-    const prompt = `
+    let prompt = `
       You are an expert technical interviewer. 
       Generate a single interview question for a candidate applying for:
       - Role: ${role}
       - Topic: ${topic}
       - Experience: ${experience} years
+    `;
 
-      The question can be algorithmic, system design, or conceptual based on the topic provided.
-      
-      Format the output clearly using Markdown:
-      # [Title]
-      
-      ## Problem Description
-      [Description]
-      
-      ## Key Constraints / Requirements
-      [Constraints or Key Points]
-      
-      ## Example Input/Output (if applicable)
-      [Example]
-      
-      DO NOT provide the solution code. Just the problem statement.
+    // CONDITIONAL LOGIC: If JD is provided, use it!
+    if (description) {
+        prompt += `
+        
+        Here is the specific Job Description for the role:
+        "${description}"
+        
+        Please tailor the question to test skills specifically mentioned in this job description.
+        `;
+    }
+
+    prompt += `
+      The question can be algorithmic, system design, or conceptual.
+      Format the output clearly using Markdown...
+      (rest of the prompt remains the same)
     `;
 
     const result = await model.generateContent(prompt);

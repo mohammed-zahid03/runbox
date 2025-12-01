@@ -61,11 +61,11 @@ export const getAIHint = async (code: string) => {
 };
 
 // Generate Question
-export const generateQuestion = async (role: string, topic: string, experience: string) => {
+export const generateQuestion = async (role: string, topic: string, experience: string, description: string = "") => {
   const response = await fetch("http://localhost:5000/api/ai/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ role, topic, experience }),
+    body: JSON.stringify({ role, topic, experience, description }),
   });
   return await response.json();
 };

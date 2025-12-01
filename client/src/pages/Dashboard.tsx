@@ -1,3 +1,4 @@
+import InterviewModal from "../components/InterviewModal";
 import { useEffect, useState } from "react";
 import { UserButton, useUser } from "@clerk/clerk-react";
 import { Link } from "react-router-dom";
@@ -63,10 +64,7 @@ export default function Dashboard() {
       <div className="max-w-7xl mx-auto p-8">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold text-white">My Snippets</h1>
-          <Link to="/room/new" className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-all">
-            <Plus size={18} />
-            New Code
-          </Link>
+          <InterviewModal />
         </div>
 
         {loading && (

@@ -59,3 +59,13 @@ export const getAIHint = async (code: string) => {
   });
   return await response.json();
 };
+
+// Generate Question
+export const generateQuestion = async (role: string, topic: string, experience: string) => {
+  const response = await fetch("http://localhost:5000/api/ai/generate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ role, topic, experience }),
+  });
+  return await response.json();
+};

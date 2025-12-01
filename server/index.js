@@ -127,34 +127,85 @@ app.delete("/api/snippets/:id", async (req, res) => {
   }
 });
 
-// 6. AI HINT Route (Debug Version)
+// 6. AI HINT Route (Final Version)
 app.post("/api/ai/hint", async (req, res) => {
   console.log("🤖 AI Hint Request Received!"); 
 
   try {
     const { code } = req.body;
     
-    // TRY THIS MODEL NAME (It is the most standard one)
-    // Use the name exactly as it appeared in your successful test list
+    // CORRECT MODEL NAME (From your test list)
     const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
 
-    const prompt = `Hint for this code (no solution): "${code}"`;
+    const prompt = `
+      You are an expert coding interviewer. 
+      Here is the user's code:
+      "${code}"
+
+      Please provide a helpful, concise hint to help them improve or fix their code. 
+      DO NOT write the full solution code. Just give a conceptual hint or point out a logic error.
+      Keep it under 3 sentences.
+    `;
 
     const result = await model.generateContent(prompt);
     const response = await result.response;
     const hint = response.text();
     
-    console.log("✅ Hint generated:", hint);
+    console.log("✅ Hint generated successfully");
     res.json({ hint });
     
   } catch (error) {
     console.error("❌ AI Error:", error);
     
-    // SEND THE REAL ERROR TO THE BROWSER
+    // Send detailed error to frontend so we can debug
     res.status(500).json({ 
         error: "AI Failed", 
         details: error.message || error.toString() 
     });
+  }
+});
+
+// 7. GENERATE INTERVIEW QUESTION (Upgraded)
+app.post("/api/ai/generate", async (req, res) => {
+  try {
+    const { role, topic, experience } = req.body;
+    
+    // Using the same model that worked for hints
+    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+
+    // Smarter Prompt for Interview Questions
+    const prompt = `
+      You are an expert technical interviewer. 
+      Generate a single interview question for a candidate applying for:
+      - Role: ${role}
+      - Topic: ${topic}
+      - Experience: ${experience} years
+
+      The question can be algorithmic, system design, or conceptual based on the topic provided.
+      
+      Format the output clearly using Markdown:
+      # [Title]
+      
+      ## Problem Description
+      [Description]
+      
+      ## Key Constraints / Requirements
+      [Constraints or Key Points]
+      
+      ## Example Input/Output (if applicable)
+      [Example]
+      
+      DO NOT provide the solution code. Just the problem statement.
+    `;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const question = response.text();
+
+    res.json({ question });
+  } catch (error) {
+    console.error("AI Generate Error:", error);
+    res.status(500).json({ error: "Failed to generate question" });
   }
 });
 

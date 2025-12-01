@@ -1,16 +1,15 @@
-import VideoCall from "../components/VideoCall";
 import { useEffect, useState, useRef } from "react";
-import { useParams } from "react-router-dom";
+import { useParams, useLocation } from "react-router-dom"; // Added useLocation
 import CodeEditor from "../components/CodeEditor";
+import VideoCall from "../components/VideoCall";
 import { ArrowLeft, Loader2, Play, Save, Sparkles, Lightbulb, AlertTriangle, FileDown, MessageSquare, Terminal } from "lucide-react";
 import { Link } from "react-router-dom";
-import { executeCode, saveCode, getSnippetById, getAIHint } from "../api/code";
+import { executeCode, saveCode, getSnippetById, getAIHint, generateQuestion } from "../api/code"; // Added generateQuestion
 import { useUser } from "@clerk/clerk-react";
 import toast, { Toaster } from "react-hot-toast";
 import { socket } from "../socket";
 import jsPDF from "jspdf";
 import { LANGUAGE_VERSIONS, CODE_SNIPPETS } from "../constants";
-
 
 interface Message {
   sender: string;
@@ -21,14 +20,19 @@ interface Message {
 export default function InterviewRoom() {
   const { user } = useUser();
   const { id } = useParams();
+  const location = useLocation(); // Get Modal Data
   
+  // Core State
   const [code, setCode] = useState("// Loading...");
   const [language, setLanguage] = useState("javascript");
   const [output, setOutput] = useState<string[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  
+  // AI State
   const [hint, setHint] = useState<string | null>(null);
   const [gettingHint, setGettingHint] = useState(false);
+  const [question, setQuestion] = useState("Loading interview question..."); // Question State
 
   // Chat State
   const [activeTab, setActiveTab] = useState<"output" | "chat">("output");
@@ -36,7 +40,38 @@ export default function InterviewRoom() {
   const [newMessage, setNewMessage] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // --- SOCKET LOGIC ---
+  // --- 1. GENERATE QUESTION ON LOAD ---
+  useEffect(() => {
+    const initSession = async () => {
+        if (id && id !== "new" && !location.state?.role) {
+            try {
+              const data = await getSnippetById(id);
+              if (data.code) setCode(data.code);
+              setQuestion("Refactoring or reviewing saved code."); 
+            } catch (error) {
+              toast.error("Could not load code");
+            }
+        } 
+        else if (location.state?.role) {
+            const { role, topic, experience } = location.state;
+            try {
+                setQuestion("Generating your unique interview question...");
+                const data = await generateQuestion(role, topic, experience);
+                if (data.question) setQuestion(data.question);
+            } catch (err) {
+                setQuestion("Failed to generate question. Using default.");
+                setCode(CODE_SNIPPETS["javascript"]);
+            }
+        } 
+        else {
+            setQuestion("Write a function that prints 'Hello World'.");
+            setCode(CODE_SNIPPETS["javascript"]);
+        }
+    };
+    initSession();
+  }, [id, location.state]);
+
+  // --- 2. SOCKET LOGIC (Fixed Chat) ---
   useEffect(() => {
     if (!id) return;
 
@@ -46,29 +81,24 @@ export default function InterviewRoom() {
     const handleWarning = (msg: string) => toast(msg, { icon: '⚠️', style: { borderRadius: '10px', background: '#333', color: '#fff', border: '1px solid red' }, duration: 4000 });
     
     const handleMessage = (data: any) => {
+        // Simple Deduplication: Don't add if identical to last message
         setMessages((prev) => {
-            // Prevent adding the same message if it already exists (Simple Deduplication)
-            // We check if the last message is identical to the incoming one
             const lastMsg = prev[prev.length - 1];
             if (lastMsg && lastMsg.message === data.message && lastMsg.sender === data.sender) {
                 return prev;
             }
-            
             const isMe = data.sender === (user?.firstName || "Guest");
             return [...prev, { sender: data.sender, message: data.message, isMe }];
         });
         
-        // Notify if chat is hidden
         const isMe = data.sender === (user?.firstName || "Guest");
         if (activeTab !== "chat" && !isMe) toast("New message in chat!", { icon: "💬" });
     };
 
-    // NUCLEAR CLEANUP: Remove ANY existing listeners first
     socket.off("code-update");
     socket.off("receive-warning");
     socket.off("receive-message");
 
-    // Attach Listeners
     socket.on("code-update", handleCodeUpdate);
     socket.on("receive-warning", handleWarning);
     socket.on("receive-message", handleMessage);
@@ -80,21 +110,14 @@ export default function InterviewRoom() {
     };
   }, [id, activeTab, user]);
 
-  // --- PROCTOR LOGIC ---
+  // --- 3. PROCTOR ---
   useEffect(() => {
-    const handleVisibilityChange = () => {
-        if (document.hidden && id) socket.emit("signal-warning", id);
-    };
+    const handleVisibilityChange = () => { if (document.hidden && id) socket.emit("signal-warning", id); };
     document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => document.removeEventListener("visibilitychange", handleVisibilityChange);
   }, [id]);
 
-  // --- AUTO SCROLL ---
-  useEffect(() => {
-    if (activeTab === "chat") {
-        chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [messages, activeTab]);
+  useEffect(() => { if (activeTab === "chat") chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, activeTab]);
 
   // --- HANDLERS ---
   const onSelectLanguage = (lang: string) => {
@@ -113,10 +136,6 @@ export default function InterviewRoom() {
   const handleSendMessage = () => {
     if (!newMessage.trim()) return;
     const msgData = { sender: user?.firstName || "Guest", message: newMessage };
-    
-    // IMPORTANT: DO NOT add to local state here.
-    // Wait for server to send it back via 'receive-message'
-    
     if (id) socket.emit("send-message", { roomId: id, ...msgData });
     setNewMessage("");
   };
@@ -130,24 +149,13 @@ export default function InterviewRoom() {
       const logs = result.run.stdout ? result.run.stdout.split("\n") : [];
       const errors = result.run.stderr ? result.run.stderr.split("\n") : [];
       setOutput([...logs, ...errors]);
-    } catch (error) {
-      setOutput(["Error executing code."]);
-    } finally {
-      setIsLoading(false);
-    }
+    } catch (error) { setOutput(["Error executing code."]); } finally { setIsLoading(false); }
   };
 
   const handleSave = async () => {
     if (!user) { toast.error("Please log in!"); return; }
     setIsSaving(true);
-    try {
-      await saveCode(user.id, code);
-      toast.success("Code saved!");
-    } catch (error) {
-      toast.error("Failed to save.");
-    } finally {
-      setIsSaving(false);
-    }
+    try { await saveCode(user.id, code); toast.success("Code saved!"); } catch (error) { toast.error("Failed to save."); } finally { setIsSaving(false); }
   };
 
   const handleGetHint = async () => {
@@ -155,32 +163,18 @@ export default function InterviewRoom() {
     setHint(null);
     try {
         const data = await getAIHint(code);
-        if (data.hint) {
-            setHint(data.hint);
-            toast.success("AI Hint Generated!", { icon: "💡" });
-        } else {
-            toast.error("AI Error: " + (data.details || "Unknown error"));
-        }
-    } catch (error) {
-        toast.error("AI is busy right now.");
-    } finally {
-        setGettingHint(false);
-    }
+        if (data.hint) { setHint(data.hint); toast.success("Hint Generated!", { icon: "💡" }); } else { toast.error("AI Error: " + (data.details || "Unknown")); }
+    } catch (error) { toast.error("AI busy."); } finally { setGettingHint(false); }
   };
 
   const generatePDF = () => {
     const doc = new jsPDF();
-    doc.setFontSize(20); doc.text("Runbox Interview Report", 20, 20);
-    doc.setFontSize(12); doc.text(`Candidate: ${user?.firstName || "Guest"}`, 20, 30);
-    doc.text(`Date: ${new Date().toLocaleDateString()}`, 20, 38);
-    doc.text(`Language: ${language.toUpperCase()}`, 20, 46);
-    doc.setFontSize(14); doc.text("Final Code:", 20, 60);
-    doc.setFontSize(10); doc.setFont("courier");
-    const splitCode = doc.splitTextToSize(code, 170);
-    doc.text(splitCode, 20, 70);
-    if (hint) { doc.setFont("helvetica", "italic"); doc.setTextColor(100); doc.text("Note: AI Hints used.", 20, 280); }
-    doc.save("Interview-Report.pdf");
-    toast.success("Report Downloaded!");
+    doc.text("Runbox Report", 20, 20);
+    doc.text(`Candidate: ${user?.firstName}`, 20, 30);
+    doc.text("Code:", 20, 50);
+    doc.setFont("courier");
+    doc.text(doc.splitTextToSize(code, 170), 20, 60);
+    doc.save("Report.pdf");
   };
 
   return (
@@ -211,7 +205,13 @@ export default function InterviewRoom() {
       <div className="flex-1 flex overflow-hidden">
         <div className="w-1/3 border-r border-gray-800 flex flex-col bg-gray-900/50">
           <div className="p-6 overflow-y-auto flex-1 border-b border-gray-800">
-            <h2 className="text-2xl font-bold mb-4">Output</h2>
+            <h2 className="text-2xl font-bold mb-4">Problem Description</h2>
+            
+            {/* AI GENERATED QUESTION (Here is the new part) */}
+            <div className="prose prose-invert max-w-none text-gray-300 text-sm leading-relaxed mb-6 whitespace-pre-wrap font-sans">
+                {question}
+            </div>
+
             {hint && (
                 <div className="bg-purple-900/20 border border-purple-500/30 p-4 rounded-lg animate-in fade-in slide-in-from-top-2 mb-6">
                     <div className="flex items-center gap-2 mb-2 text-purple-300 font-bold"><Lightbulb size={18} /> AI Coach says:</div>

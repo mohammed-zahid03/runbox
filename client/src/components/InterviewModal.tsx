@@ -9,6 +9,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useNavigate } from "react-router-dom";
 import { Loader2, Plus } from "lucide-react";
 import toast from "react-hot-toast";
@@ -19,6 +26,7 @@ export default function InterviewModal() {
   const [role, setRole] = useState("");
   const [topic, setTopic] = useState("");
   const [experience, setExperience] = useState("");
+  const [mode, setMode] = useState("technical"); // NEW: Mode State
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
@@ -30,7 +38,7 @@ export default function InterviewModal() {
 
     setLoading(true);
     
-    // Simulate AI Generation delay (We will add real AI logic later)
+    // Simulate AI Generation delay
     setTimeout(() => {
         setLoading(false);
         setOpen(false);
@@ -38,16 +46,16 @@ export default function InterviewModal() {
         // Generate a random Room ID
         const roomId = Math.random().toString(36).substring(7);
         
-        // Navigate to the room and pass the config via State
-        navigate(`/room/${roomId}`, { 
-            state: { 
-                role, 
-                topic, 
-                experience,
-                description,
-                mode: "technical" // Default mode for now
-            } 
-        });
+        // Navigate based on selected MODE
+        if (mode === "verbal") {
+            navigate(`/room/verbal/${roomId}`, { 
+                state: { role, topic, experience, description, mode: "verbal" } 
+            });
+        } else {
+            navigate(`/room/${roomId}`, { 
+                state: { role, topic, experience, description, mode: "technical" } 
+            });
+        }
         
         toast.success("Interview Environment Ready!");
     }, 1500);
@@ -67,6 +75,20 @@ export default function InterviewModal() {
         </DialogHeader>
         <div className="grid gap-4 py-4">
           
+          {/* NEW: INTERVIEW TYPE SELECTOR */}
+          <div className="grid gap-2">
+            <Label className="text-zinc-400">Interview Type</Label>
+            <Select onValueChange={setMode} defaultValue={mode}>
+              <SelectTrigger className="bg-black/50 border-zinc-700 text-white">
+                <SelectValue placeholder="Select type" />
+              </SelectTrigger>
+              <SelectContent className="bg-zinc-900 border-zinc-800 text-white">
+                <SelectItem value="technical">Technical (Coding)</SelectItem>
+                <SelectItem value="verbal">Behavioral (Speaking)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
           <div className="grid gap-2">
             <Label className="text-zinc-400">Job Role / Position</Label>
             <Input 
@@ -89,11 +111,11 @@ export default function InterviewModal() {
 
           <div className="grid gap-2">
             <Label className="text-zinc-400">Job Description (Paste from LinkedIn)</Label>
-          <textarea 
-            placeholder="Paste the full job description here..."
-            value={description} 
-            onChange={(e) => setDescription(e.target.value)} 
-            className="bg-black/50 border-zinc-700 focus:border-blue-500 text-white min-h-[100px] p-2 rounded-md text-sm" 
+            <textarea 
+                placeholder="Paste the full job description here..."
+                value={description} 
+                onChange={(e) => setDescription(e.target.value)} 
+                className="bg-black/50 border-zinc-700 focus:border-blue-500 text-white min-h-[100px] p-2 rounded-md text-sm" 
             />
           </div>
 

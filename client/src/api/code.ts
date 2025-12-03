@@ -69,3 +69,13 @@ export const generateQuestion = async (role: string, topic: string, experience: 
   });
   return await response.json();
 };
+
+// Get Feedback
+export const getFeedback = async (question: string, answer: string) => {
+  const response = await fetch("http://localhost:5000/api/ai/feedback", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ question, answer }),
+  });
+  return await response.json();
+};

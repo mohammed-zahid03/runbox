@@ -210,6 +210,37 @@ app.post("/api/ai/generate", async (req, res) => {
   }
 });
 
+// 8. GENERATE FEEDBACK (Verbal Interview)
+app.post("/api/ai/feedback", async (req, res) => {
+  try {
+    const { question, answer } = req.body;
+    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+
+    const prompt = `
+      You are an expert interviewer evaluating a candidate's verbal answer.
+      
+      Question: "${question}"
+      Candidate's Answer: "${answer}"
+      
+      Please analyze the answer and provide:
+      1. A rating out of 10.
+      2. Constructive feedback on clarity, content, and confidence.
+      3. A better way they could have answered (if applicable).
+      
+      Format the output nicely using Markdown.
+    `;
+
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const feedback = response.text();
+
+    res.json({ feedback });
+  } catch (error) {
+    console.error("AI Feedback Error:", error);
+    res.status(500).json({ error: "Failed to generate feedback" });
+  }
+});
+
 // 4. Start the SERVER (Not app.listen)
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);

@@ -21,12 +21,17 @@ export default function VerbalRoom() {
   const [analyzing, setAnalyzing] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   
-  // Ref to prevent double-speaking on re-renders
   const hasSpokenRef = useRef(false);
 
-  const { transcript, listening, resetTranscript, browserSupportsSpeechRecognition } = useSpeechRecognition();
+  // Safe Speech Recognition Hook
+  const {
+    transcript,
+    listening,
+    resetTranscript,
+    browserSupportsSpeechRecognition
+  } = useSpeechRecognition();
 
-  // 1. TEXT TO SPEECH (With Stop Capability)
+  // 1. TEXT TO SPEECH
   const speakQuestion = (text: string) => {
     if (!('speechSynthesis' in window)) {
         toast.error("Text-to-speech not supported.");
@@ -34,45 +39,34 @@ export default function VerbalRoom() {
     }
 
     if (isSpeaking) {
-        // STOP speaking
         window.speechSynthesis.cancel();
         setIsSpeaking(false);
     } else {
-        // START speaking
-        window.speechSynthesis.cancel(); // Clear queue
+        window.speechSynthesis.cancel();
         const utterance = new SpeechSynthesisUtterance(text);
-        
         utterance.onend = () => setIsSpeaking(false);
         utterance.onerror = () => setIsSpeaking(false);
-        
         window.speechSynthesis.speak(utterance);
         setIsSpeaking(true);
     }
   };
 
-  // Stop speaking when leaving page
   useEffect(() => {
-    return () => {
-        window.speechSynthesis.cancel();
-    };
+    return () => { window.speechSynthesis.cancel(); };
   }, []);
 
-  // 2. GENERATE QUESTION & SPEAK ONCE
+  // 2. GENERATE QUESTION
   useEffect(() => {
     const initSession = async () => {
         if (location.state?.role) {
             const { role, topic, experience } = location.state;
             try {
-                // Only fetch if we haven't already (simple check)
                 if (question === "Loading interview question...") {
                     const data = await generateQuestion(role, topic + " (Behavioral/Soft Skills)", experience);
                     if (data.question) {
                         setQuestion(data.question);
-                        
-                        // Speak ONLY if we haven't spoken this question yet
                         if (!hasSpokenRef.current) {
                             setTimeout(() => {
-                                // Double check ref inside timeout to be safe
                                 if (!hasSpokenRef.current) {
                                     speakQuestion(data.question);
                                     hasSpokenRef.current = true;
@@ -88,11 +82,10 @@ export default function VerbalRoom() {
             setQuestion("Tell me about a time you had to learn a new technology quickly.");
         }
     };
-    
     initSession();
-  }, [location.state]); // Dependency array protects against loops
+  }, [location.state]);
 
-  // 3. HANDLE RECORDING
+  // 3. HANDLERS
   const toggleRecording = () => {
     if (isRecording) {
         SpeechRecognition.stopListening();
@@ -104,10 +97,10 @@ export default function VerbalRoom() {
     setIsRecording(!isRecording);
   };
 
-  // 4. SUBMIT ANSWER
   const handleSubmitAnswer = async () => {
-    if (!transcript) {
-        toast.error("Please record an answer first!");
+    // Validation: Don't submit if empty
+    if (!transcript || transcript.trim().length < 5) {
+        toast.error("Please record an answer first (min 5 chars)!");
         return;
     }
     
@@ -117,8 +110,11 @@ export default function VerbalRoom() {
         if (data.feedback) {
             setFeedback(data.feedback);
             toast.success("Feedback Generated!");
+        } else {
+            toast.error("AI returned empty feedback.");
         }
     } catch (error) {
+        console.error("Feedback Error:", error);
         toast.error("Failed to get feedback.");
     } finally {
         setAnalyzing(false);
@@ -126,7 +122,7 @@ export default function VerbalRoom() {
   };
 
   if (!browserSupportsSpeechRecognition) {
-    return <div className="text-white text-center mt-20">Browser doesn't support speech recognition. Please use Chrome.</div>;
+    return <div className="text-white text-center mt-20">Browser doesn't support speech recognition. Use Chrome.</div>;
   }
 
   return (
@@ -190,7 +186,7 @@ export default function VerbalRoom() {
                 {webcamEnabled ? (
                     <Webcam audio={false} mirrored={true} className="w-full h-full object-cover" />
                 ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center text-zinc-600 gap-2">
+                    <div className="w-full h-full flex items-center justify-center text-zinc-600 gap-2">
                         <VideoOff size={48} />
                         <span className="text-sm">Camera Off</span>
                     </div>
@@ -212,37 +208,19 @@ export default function VerbalRoom() {
                 className="w-full h-14 text-lg bg-green-600 hover:bg-green-700 shadow-lg shadow-green-900/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
                 {analyzing ? <Loader2 className="animate-spin mr-2" /> : <Sparkles className="mr-2" size={20} />}
-                {analyzing ? "Analyzing Answer..." : "Submit Answer for AI Review"}
+                {analyzing ? "Submit Answer for AI Review" : "Submit Answer for AI Review"}
             </Button>
 
-            {/* AI FEEDBACK CARD */}
-            {/* AI FEEDBACK CARD */}
+            {/* AI FEEDBACK CARD (SAFE RENDER) */}
             {feedback && (
-                <Card className="w-full bg-zinc-900 border-purple-500/30 animate-in fade-in slide-in-from-bottom-4 shadow-xl shadow-purple-900/10 mt-6">
-                    <CardHeader>
-                        <CardTitle className="text-purple-400 flex items-center gap-2">
-                            <Sparkles size={20} /> AI Feedback Report
-                        </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        <div className="max-h-[400px] overflow-y-auto bg-black/40 p-4 rounded-lg border border-white/5">
-                            <ReactMarkdown 
-                                className="prose prose-invert prose-sm max-w-none text-zinc-300"
-                                components={{
-                                    strong: ({node, ...props}) => <span className="text-purple-300 font-bold" {...props} />,
-                                    h1: ({node, ...props}) => <h1 className="text-xl font-bold text-white mb-2 mt-4" {...props} />,
-                                    h2: ({node, ...props}) => <h2 className="text-lg font-bold text-white mb-2 mt-4" {...props} />,
-                                    h3: ({node, ...props}) => <h3 className="text-md font-bold text-blue-300 mb-1 mt-2" {...props} />,
-                                    ul: ({node, ...props}) => <ul className="list-disc pl-5 space-y-1 my-2" {...props} />,
-                                    li: ({node, ...props}) => <li className="text-zinc-400" {...props} />,
-                                    p: ({node, ...props}) => <p className="mb-2" {...props} />,
-                                }}
-                            >
-                                {feedback}
-                            </ReactMarkdown>
-                        </div>
-                    </CardContent>
-                </Card>
+                <div className="w-full bg-zinc-900 border border-purple-500/30 rounded-xl p-4 shadow-xl shadow-purple-900/10 mt-6 animate-in fade-in slide-in-from-bottom-4">
+                    <h3 className="text-purple-400 font-bold flex items-center gap-2 mb-4">
+                        <Sparkles size={20} /> AI Feedback Report
+                    </h3>
+                    <div className="prose prose-invert prose-sm max-w-none text-zinc-300 max-h-[400px] overflow-y-auto bg-black/40 p-4 rounded-lg border border-white/5">
+                        <ReactMarkdown>{feedback}</ReactMarkdown>
+                    </div>
+                </div>
             )}
         </div>
 

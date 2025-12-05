@@ -25,7 +25,7 @@ export default function Dashboard() {
   const loadSnippets = async () => {
     try {
       if (!user) return;
-      const data = await getAllSnippets(user.id);
+      const data = await getAllSnippets();
       setSnippets(data);
     } catch (error) {
       toast.error("Failed to load snippets");

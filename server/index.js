@@ -1,247 +1,302 @@
-const express = require("express");
-const cors = require("cors");
-const dotenv = require("dotenv");
-const mongoose = require("mongoose");
-const Snippet = require("./models/Snippet");
-const { GoogleGenerativeAI } = require("@google/generative-ai");
-const http = require("http"); // 1. Import HTTP
-const { Server } = require("socket.io"); // 2. Import Socket.io
+// server/index.js (REPLACE your file with this)
+require('dotenv').config();
 
-dotenv.config();
+const clerkAuth = require('./middleware/clerkAuth');
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const mongoSanitize = require('express-mongo-sanitize');
+const morgan = require('morgan');
+const { v4: uuidv4 } = require('uuid');
+const http = require('http');
+const { Server } = require('socket.io');
+const mongoose = require('mongoose');
+const Snippet = require('./models/Snippet');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// 3. Create the Real-Time Server
+// Basic sanity checks for required secrets (fail fast in non-local envs)
+if (!process.env.GEMINI_API_KEY) {
+  console.warn('⚠️  Warning: GEMINI_API_KEY not set. AI endpoints will not work until set.');
+}
+
+// ----- HTTP SERVER & SOCKET.IO -----
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "http://localhost:5173", // Allow Frontend to connect
-    methods: ["GET", "POST"],
+    origin: process.env.FRONTEND_ORIGIN || 'http://localhost:5173',
+    methods: ['GET', 'POST'],
   },
 });
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// ----- Middleware: security + parsing + logging -----
+app.use(helmet());
+app.use(cors({ origin: process.env.FRONTEND_ORIGIN || 'http://localhost:5173' }));
 
-// Database Connection
+// Limit request body size (protect against huge payloads)
+app.use(express.json({ limit: '200kb' }));
+app.use(express.urlencoded({ extended: true, limit: '200kb' }));
+
+// Sanitize incoming data to prevent NoSQL injection
+app.use(mongoSanitize());
+
+// Request logging with request-id
+app.use((req, res, next) => {
+  req.id = uuidv4();
+  res.setHeader('X-Request-Id', req.id);
+  next();
+});
+// morgan combined with request id — simple JSON-like log lines
+app.use(morgan(':method :url :status :res[content-length] - :response-time ms - reqId=:req[id]'));
+
+// ----- Rate limiters -----
+// Global gentle limiter
+const globalLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 200, // max requests per IP per window
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(globalLimiter);
+
+// Stronger limiter for AI / execution endpoints (protect your paid API usage)
+const aiLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10, // max AI calls per IP per minute — tune according to plan
+  message: { error: 'Too many AI requests. Slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// ----- DB Connection -----
 mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ MongoDB Connected Successfully"))
-  .catch((err) => console.error("❌ MongoDB Connection Error:", err));
+  .connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
+  .then(() => console.log('✅ MongoDB Connected Successfully'))
+  .catch((err) => {
+    console.error('❌ MongoDB Connection Error:', err);
+    process.exit(1);
+  });
 
-// AI Configuration
-// PASTE YOUR KEY DIRECTLY HERE (Inside quotes)
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+// ----- AI Client (guarded) -----
+let genAI = null;
+try {
+  if (process.env.GEMINI_API_KEY) {
+    genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+  } else {
+    genAI = null; // we'll check in endpoints
+  }
+} catch (err) {
+  console.error('❌ Failed to initialize GoogleGenerativeAI:', err);
+  genAI = null;
+}
 
-// --- SOCKET.IO REAL-TIME LOGIC ---
-io.on("connection", (socket) => {
-  console.log("🔌 User Connected:", socket.id);
+// ----- Helper: safeTextExtract (guard against undefined) -----
+function extractTextFromModelResponse(result) {
+  try {
+    const response = result.response;
+    if (!response) return '';
+    if (typeof response.text === 'function') return response.text();
+    // fallback: attempt to stringify
+    return String(response);
+  } catch (e) {
+    return '';
+  }
+}
 
-  
+// ----- SOCKET.IO Real-time -----
+// Keep socket handling minimal and safe — trust server to broadcast, not client-sent lists of sockets
+io.on('connection', (socket) => {
+  console.log(`🔌 Socket connected: ${socket.id}`);
 
-
-  // 1. User Joins Room
-  socket.on("join-room", (roomId) => {
+  socket.on('join-room', (roomId) => {
+    if (!roomId) return;
     socket.join(roomId);
-    console.log(`User ${socket.id} joined room: ${roomId}`);
+    console.log(`Socket ${socket.id} joined room ${roomId}`);
   });
 
-  // 2. Code Change
-  socket.on("code-change", ({ roomId, code }) => {
-    socket.to(roomId).emit("code-update", code);
+  socket.on('code-change', ({ roomId, code }) => {
+    if (!roomId) return;
+    // broadcast to others
+    socket.to(roomId).emit('code-update', { code, sender: socket.id });
   });
 
-  // 3. Warning Signal (Anti-Cheat)
-  socket.on("signal-warning", (roomId) => {
-    console.log("⚠️ WARNING RECEIVED for Room:", roomId); // <--- ADD THIS
-    socket.to(roomId).emit("receive-warning", "⚠️ Candidate switched tabs!");
+  socket.on('signal-warning', (roomId) => {
+    if (!roomId) return;
+    console.log(`⚠️ Warning in room ${roomId} from ${socket.id}`);
+    // broadcast to everyone in room (including sender) so UI shows the warning
+    io.to(roomId).emit('receive-warning', { message: 'Candidate switched tabs', from: socket.id });
   });
 
-  // ... inside io.on ...
-
-// 4. Chat Message
-  // Update to accept 'id'
-  socket.on("send-message", ({ roomId, message, sender, id }) => {
-    // Broadcast to everyone ELSE
-    socket.to(roomId).emit("receive-message", { message, sender, id });
+  // Single consistent handler for chat:
+  socket.on('send-message', ({ roomId, message, sender }) => {
+    if (!roomId || !message) return;
+    // Broadcast message to everyone in the room (including sender)
+    io.to(roomId).emit('receive-message', { message, sender, id: socket.id, ts: Date.now() });
   });
 
- // ... inside io.on ...
-
- // 4. Chat Message
-  socket.on("send-message", ({ roomId, message, sender }) => {
-    // CHANGE THIS: Use 'io.to' to send to EVERYONE (including sender)
-    io.to(roomId).emit("receive-message", { message, sender });
-  });
-
-  // ... (disconnect logic)
-
-  // 4. Disconnect
-  socket.on("disconnect", () => {
-    console.log("User Disconnected:", socket.id);
+  socket.on('disconnect', () => {
+    console.log(`🔌 Socket disconnected: ${socket.id}`);
   });
 });
 
-// --- API ROUTES ---
+// ----- Routes -----
+// Root
+app.get('/', (req, res) => res.send('Runbox API is running!'));
 
-app.get("/", (req, res) => res.send("Runbox API is running!"));
+// Centralized async wrapper to catch errors in routes
+const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-app.post("/api/save", async (req, res) => {
-  try {
-    const { userId, code, language } = req.body;
-    const newSnippet = new Snippet({ userId, code, language, title: "Interview Practice" });
-    await newSnippet.save();
-    res.status(201).json({ message: "Code saved!", snippet: newSnippet });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to save code" });
-  }
-});
+// Save snippet (basic validation + body size limit)
+// Secure Save snippet — replaces your existing /api/save route
+app.post(
+  '/api/save',
+  clerkAuth,
+  wrap(async (req, res) => {
+    const userId = req.userId; // FROM Clerk middleware
+    const { code, language } = req.body || {};
 
-app.get("/api/snippets/:userId", async (req, res) => {
-  try {
-    const snippets = await Snippet.find({ userId: req.params.userId }).sort({ createdAt: -1 });
-    res.json(snippets);
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch snippets" });
-  }
-});
-
-app.get("/api/snippet/:id", async (req, res) => {
-  try {
-    const snippet = await Snippet.findById(req.params.id);
-    if (!snippet) return res.status(404).json({ error: "Snippet not found" });
-    res.json(snippet);
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch snippet" });
-  }
-});
-
-app.delete("/api/snippets/:id", async (req, res) => {
-  try {
-    await Snippet.findByIdAndDelete(req.params.id);
-    res.json({ message: "Snippet deleted" });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to delete" });
-  }
-});
-
-// 6. AI HINT Route (Final Version)
-app.post("/api/ai/hint", async (req, res) => {
-  console.log("🤖 AI Hint Request Received!"); 
-
-  try {
-    const { code } = req.body;
-    
-    // CORRECT MODEL NAME (From your test list)
-    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
-
-    const prompt = `
-      You are an expert coding interviewer. 
-      Here is the user's code:
-      "${code}"
-
-      Please provide a helpful, concise hint to help them improve or fix their code. 
-      DO NOT write the full solution code. Just give a conceptual hint or point out a logic error.
-      Keep it under 3 sentences.
-    `;
-
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const hint = response.text();
-    
-    console.log("✅ Hint generated successfully");
-    res.json({ hint });
-    
-  } catch (error) {
-    console.error("❌ AI Error:", error);
-    
-    // Send detailed error to frontend so we can debug
-    res.status(500).json({ 
-        error: "AI Failed", 
-        details: error.message || error.toString() 
-    });
-  }
-});
-
-// 7. GENERATE INTERVIEW QUESTION (Upgraded)
-app.post("/api/ai/generate", async (req, res) => {
-  try {
-    const { role, topic, experience, description } = req.body;
-    
-    // Using the same model that worked for hints
-    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
-
-    // Smarter Prompt for Interview Questions
-    let prompt = `
-      You are an expert technical interviewer. 
-      Generate a single interview question for a candidate applying for:
-      - Role: ${role}
-      - Topic: ${topic}
-      - Experience: ${experience} years
-    `;
-
-    // CONDITIONAL LOGIC: If JD is provided, use it!
-    if (description) {
-        prompt += `
-        
-        Here is the specific Job Description for the role:
-        "${description}"
-        
-        Please tailor the question to test skills specifically mentioned in this job description.
-        `;
+    if (!code || !language) {
+      return res.status(400).json({ error: 'Missing required fields: code, language' });
     }
 
-    prompt += `
-      The question can be algorithmic, system design, or conceptual.
-      Format the output clearly using Markdown...
-      (rest of the prompt remains the same)
-    `;
+    if (typeof code === 'string' && code.length > 20000) {
+      return res.status(413).json({ error: 'Code payload too large' });
+    }
 
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const question = response.text();
+    const newSnippet = new Snippet({
+      userId,
+      code,
+      language,
+      title: 'Interview Practice',
+    });
 
-    res.json({ question });
-  } catch (error) {
-    console.error("AI Generate Error:", error);
-    res.status(500).json({ error: "Failed to generate question" });
-  }
-});
+    await newSnippet.save();
+    return res.status(201).json({ message: 'Code saved!', snippet: newSnippet });
+  })
+);
 
-// 8. GENERATE FEEDBACK (Verbal Interview)
-app.post("/api/ai/feedback", async (req, res) => {
-  try {
-    const { question, answer } = req.body;
-    const model = genAI.getGenerativeModel({ model: "gemini-flash-latest" });
+
+// Fetch snippets (paginated)
+// Get current user's snippets (paginated) — new /api/snippets (auth required)
+app.get(
+  '/api/snippets',
+  clerkAuth,
+  wrap(async (req, res) => {
+    const userId = req.userId;
+    const limit = Math.min(Number(req.query.limit) || 20, 100);
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const skip = (page - 1) * limit;
+
+    const snippets = await Snippet.find({ userId }).sort({ createdAt: -1 }).skip(skip).limit(limit);
+    res.json({ data: snippets, page, limit });
+  })
+);
+
+
+// Single snippet
+// Get a single snippet — authenticated + ownership check
+app.get(
+  '/api/snippet/:id',
+  clerkAuth,
+  wrap(async (req, res) => {
+    const userId = req.userId;
+    const snippet = await Snippet.findById(req.params.id);
+    if (!snippet) return res.status(404).json({ error: 'Snippet not found' });
+    if (snippet.userId !== userId) return res.status(403).json({ error: 'Access denied' });
+    res.json(snippet);
+  })
+);
+
+// Delete snippet
+// Delete snippet — authenticated + ownership check
+app.delete(
+  '/api/snippets/:id',
+  clerkAuth,
+  wrap(async (req, res) => {
+    const userId = req.userId;
+    const snippet = await Snippet.findById(req.params.id);
+    if (!snippet) return res.status(404).json({ error: 'Snippet not found' });
+    if (snippet.userId !== userId) return res.status(403).json({ error: 'Not allowed to delete this snippet' });
+
+    await snippet.deleteOne();
+    res.json({ message: 'Snippet deleted' });
+  })
+);
+
+
+// ----- AI endpoints (rate-limited) -----
+// Use aiLimiter to protect your paid AI usage
+app.post(
+  '/api/ai/hint',
+  clerkAuth,
+  aiLimiter,
+  wrap(async (req, res) => {
+    if (!genAI) return res.status(503).json({ error: 'AI not configured' });
+
+    const { code } = req.body || {};
+    if (!code || typeof code !== 'string') return res.status(400).json({ error: 'Missing code' });
+    if (code.length > 20000) return res.status(413).json({ error: 'Code too large' });
+
+    // Choose model
+    const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
 
     const prompt = `
-      You are an expert interviewer evaluating a candidate's verbal answer.
-      
-      Question: "${question}"
-      Candidate's Answer: "${answer}"
-      
-      Please analyze the answer and provide:
-      1. A rating out of 10.
-      2. Constructive feedback on clarity, content, and confidence.
-      3. A better way they could have answered (if applicable).
-      
-      Format the output nicely using Markdown.
+You are an expert coding interviewer.
+Here is the user's code:
+"""${code}"""
+Provide a short conceptual hint (max 3 sentences). Do not provide full solution code.
     `;
 
+    // generateContent returns an object that may be streamable in some SDKs — keep it simple
     const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const feedback = response.text();
+    const hint = extractTextFromModelResponse(result) || 'No hint generated';
+    // Return minimal structured response
+    return res.json({ hint });
+  })
+);
 
-    res.json({ feedback });
-  } catch (error) {
-    console.error("AI Feedback Error:", error);
-    res.status(500).json({ error: "Failed to generate feedback" });
-  }
-});
+app.post(
+  '/api/ai/generate',
+  clerkAuth,
+  aiLimiter,
+  wrap(async (req, res) => {
+    if (!genAI) return res.status(503).json({ error: 'AI not configured' });
 
-// 4. Start the SERVER (Not app.listen)
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
+    const { role, topic, experience, description } = req.body || {};
+    // Basic validation
+    if (!role || !topic) return res.status(400).json({ error: 'Missing role or topic' });
+
+    let prompt = `
+You are an expert technical interviewer.
+Generate a single well-formed interview question for:
+Role: ${role}
+Topic: ${topic}
+Experience: ${experience || 'N/A'} years.
+    `;
+
+    if (description) {
+      prompt += `\nJob Description: """${description}"""\nTailor the question to this JD.\n`;
+    }
+
+    const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
+    const result = await model.generateContent(prompt);
+    const question = extractTextFromModelResponse(result) || 'No question generated';
+    return res.json({ question });
+  })
+);
+
+app.post(
+  '/api/ai/feedback',
+  clerkAuth,
+  aiLimiter,
+  wrap(async (req, res) => {
+    if (!genAI) return res.status(503).json({ error: 'AI not configured' });
+
+    const { question, answer } = req.body || {};
+    if (!question || !answer) return res.status(400).json({ error: 'Missing question or answer' });
+
+    const prompt = `
+You are an expert interviewer

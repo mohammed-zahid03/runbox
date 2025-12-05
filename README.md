@@ -1,15 +1,80 @@
 Runbox – Interview Practice Platform
 
-Runbox is a full-stack interview practice tool that provides:
+Runbox is a full-stack interview preparation platform designed to simulate real-world technical and behavioral interview environments.
 
-🧠 Technical coding interviews with real-time code collaboration
+🚀 Key Features
+🧠 Technical Coding Interviews
 
-🎤 Behavioral mock interviews with speech-to-text
+Real-time collaborative code editor
 
-🤖 AI-powered hints, questions, and feedback
+Multi-language support
 
-💾 Snippet saving and dashboard
+Cloud code execution (Piston API)
 
-🔌 Socket-based live collaboration
+AI-powered coding hints
 
-This repository contains both the client (React + Vite) and server (Node + Express) code.
+🎤 Behavioral Mock Interviews
+
+Speech-to-text answer capture
+
+AI feedback on clarity, content, and communication
+
+Auto-generated behavioral questions
+
+🤖 AI-Powered Assistance
+
+Smart hint generation
+
+Tailored interview questions
+
+Structured feedback on spoken answers
+
+💾 Snippet Management
+
+Save, view, and delete code snippets
+
+Clean dashboard interface
+
+Pagination-ready snippet API
+
+🔌 Live Collaboration
+
+Socket.io based real-time syncing
+
+Live chat and warning system
+
+Room-based interview sessions
+
+🏗️ Tech Stack
+Frontend
+
+React + Vite
+
+TypeScript
+
+Tailwind CSS
+
+ShadCN UI
+
+Monaco Editor
+
+Clerk Authentication
+
+Backend
+
+Node.js + Express
+
+MongoDB + Mongoose
+
+Socket.io
+
+Google Gemini API
+
+📦 Project Structure
+runbox/
+ ├── client/     # Frontend (React, Vite)
+ └── server/     # Backend (Express, MongoDB)
+
+📘 About
+
+This repository contains the full implementation of Runbox, including the client and server components.
